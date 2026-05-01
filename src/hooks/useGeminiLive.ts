@@ -567,8 +567,12 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
           personaConfig.enabledMcpTools,
         );
         tools.push(...mcpTools);
+        console.log("[TaTTTy] Tools registered with Gemini:", JSON.stringify(tools, null, 2));
 
-        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+        const tokenRes = await fetch('/api/session-token', { method: 'POST' });
+        const { token: ephemeralToken, error: tokenError } = await tokenRes.json();
+        if (!ephemeralToken) throw new Error(tokenError || 'Failed to get session token');
+        const ai = new GoogleGenAI({ apiKey: ephemeralToken });
 
         const model = personaConfig.model || "gemini-3.1-flash-live-preview";
 
