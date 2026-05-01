@@ -56,7 +56,8 @@ export const mcpInjector = {
   },
 
   executeTool: async (name: string, args: unknown): Promise<{ text: string }> => {
-    const url = toolEndpointMap.get(name)!;
+    const url = toolEndpointMap.get(name);
+    if (!url) throw new Error(`Unknown tool: ${name}`);
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

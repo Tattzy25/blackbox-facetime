@@ -6,6 +6,7 @@ import { WreckShader } from './components/WreckShader';
 import { PhoneCallIcon, type PhoneCallIconHandle } from './components/ui/phone-call';
 import { CameraPreview } from './components/video/CameraPreview';
 import { GeneratedImageOverlay } from './components/ui/GeneratedImageOverlay';
+import { ConnectingOverlay } from './components/ui/ConnectingOverlay';
 import { Dock, type DockItem } from './components/ui/Dock';
 import { useGeminiLive } from './hooks/useGeminiLive';
 import { PERSONA_CONFIG } from './lib/persona';
@@ -118,6 +119,8 @@ export default function App() {
               />
             )}
           </AnimatePresence>
+
+          <ConnectingOverlay show={status === "connecting"} />
 
           {/*
             CameraPreview is ALWAYS mounted so videoRef.current is non-null

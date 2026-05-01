@@ -562,12 +562,10 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
         if (personaConfig.enableGoogleSearch && consentGoogleSearchRef.current) {
           tools.push({ googleSearch: {} });
         }
-
-        const mcpTools = mcpInjector.getGeminiTools(
-          personaConfig.enabledMcpTools,
-        );
-        tools.push(...mcpTools);
-        console.log("[TaTTTy] Tools registered with Gemini:", JSON.stringify(tools, null, 2));
+        const mcpTools = mcpInjector.getGeminiTools(personaConfig.enabledMcpTools);
+        if (mcpTools.length > 0) {
+          tools.push({ functionDeclarations: mcpTools });
+        }
 
         const tokenRes = await fetch('/api/session-token', { method: 'POST' });
         const { token: ephemeralToken, error: tokenError } = await tokenRes.json();
@@ -650,25 +648,11 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
                   try {
                     const result = await mcpInjector.executeTool(name, args);
 
-                    // Check if the result contains an image URL from our tool
+                    // Extract img_url from tool response
                     if (result && typeof result.text === "string") {
-                      const text = result.text.trim();
-                      if (text.startsWith("http")) {
-                        setGeneratedImage(text);
-                      } else {
-                        try {
-                          const parsed = JSON.parse(text);
-                          const url =
-                            // { img_url: "https://..." }
-                            (parsed?.img_url && typeof parsed.img_url === "string" && parsed.img_url) ||
-                            // ["https://..."]
-                            (Array.isArray(parsed) && typeof parsed[0] === "string" && parsed[0]);
-                          if (url && url.startsWith("http")) setGeneratedImage(url);
-                        } catch (e) {
-                          // Extract URL from mixed text as last resort
-                          const urlMatch = text.match(/https?:\/\/[^\s"')\]>]+/);
-                          if (urlMatch) setGeneratedImage(urlMatch[0]);
-                        }
+                      const parsed = JSON.parse(result.text.trim());
+                      if (parsed?.img_url && typeof parsed.img_url === "string") {
+                        setGeneratedImage(parsed.img_url);
                       }
                     }
 
