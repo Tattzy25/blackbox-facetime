@@ -13,6 +13,7 @@ async function fetchTools(url: string): Promise<McpTool[]> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
   });
+  if (!res.ok) throw new Error(`MCP tools/list failed: ${res.status}`);
   const data = await res.json();
   return data.result?.tools ?? [];
 }
@@ -20,7 +21,12 @@ async function fetchTools(url: string): Promise<McpTool[]> {
 function toGeminiDeclaration(tool: McpTool) {
   const decl: any = { name: tool.name };
   if (tool.description) decl.description = tool.description;
-  if (tool.inputSchema) decl.parameters = tool.inputSchema;
+  if (tool.inputSchema) {
+    decl.parameters = {
+      type: "object",
+      ...tool.inputSchema,
+    };
+  }
   return decl;
 }
 
@@ -68,6 +74,7 @@ export const mcpInjector = {
         params: { name, arguments: args },
       }),
     });
+    if (!res.ok) throw new Error(`MCP tools/call failed: ${res.status}`);
     const data = await res.json();
     const content = data.result?.content;
     if (Array.isArray(content)) {

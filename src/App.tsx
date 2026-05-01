@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { Mic, MicOff, SwitchCamera, ImagePlus, Video, VideoOff, PhoneOff } from 'lucide-react';
+import { Mic, MicOff, ImagePlus, PhoneOff, Share2, Bell, BellRing } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
 import { WreckShader } from './components/WreckShader';
@@ -7,7 +7,6 @@ import { PhoneCallIcon, type PhoneCallIconHandle } from './components/ui/phone-c
 import { CameraPreview } from './components/video/CameraPreview';
 import { GeneratedImageOverlay } from './components/ui/GeneratedImageOverlay';
 import { ConnectingOverlay } from './components/ui/ConnectingOverlay';
-import { Dock, type DockItem } from './components/ui/Dock';
 import { useGeminiLive } from './hooks/useGeminiLive';
 import { PERSONA_CONFIG } from './lib/persona';
 import { VOICES, DEFAULT_VOICE_ID } from './lib/voices';
@@ -16,6 +15,7 @@ export default function App() {
   const stageRef = useRef<HTMLDivElement>(null);
   const phoneIconRef = useRef<PhoneCallIconHandle>(null);
   const [selectedVoice, setSelectedVoice] = useState(DEFAULT_VOICE_ID);
+  const [showImageOverlay, setShowImageOverlay] = useState(false);
 
   const {
     isConnected,
@@ -32,10 +32,7 @@ export default function App() {
     toggleMute,
     flipCamera,
     sendImage,
-    isVideoEnabled,
-    toggleVideo,
     generatedImage,
-    setGeneratedImage,
   } = useGeminiLive(PERSONA_CONFIG);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -53,33 +50,10 @@ export default function App() {
     }
   };
 
-  const dockItems: DockItem[] = [
-    {
-      icon: isMuted ? <MicOff className="text-red-500" /> : <Mic />,
-      label: isMuted ? "Unmute" : "Mute",
-      onClick: toggleMute,
-    },
-    {
-      icon: !isVideoEnabled ? <VideoOff className="text-red-500" /> : <Video />,
-      label: !isVideoEnabled ? "Start Video" : "Stop Video",
-      onClick: toggleVideo,
-    },
-    {
-      icon: <ImagePlus />,
-      label: "Upload Image",
-      onClick: () => fileInputRef.current?.click(),
-    },
-    {
-      icon: <SwitchCamera />,
-      label: "Flip Camera",
-      onClick: flipCamera,
-    },
-    {
-      icon: <PhoneOff className="text-red-500" />,
-      label: "End Call",
-      onClick: disconnect,
-    },
-  ];
+  const handleShare = async () => {
+    if (!generatedImage) return;
+    await navigator.share({ title: 'Tattoo Design', url: generatedImage });
+  };
 
   React.useEffect(() => {
     if (status === "connecting") {
@@ -88,6 +62,10 @@ export default function App() {
       phoneIconRef.current?.stopAnimation();
     }
   }, [status]);
+
+  React.useEffect(() => {
+    if (generatedImage) setShowImageOverlay(false);
+  }, [generatedImage]);
 
   const visualMode: 'idle' | 'listening' | 'speaking' = isAudioPlaying
     ? 'speaking'
@@ -114,10 +92,10 @@ export default function App() {
           </div>
 
           <AnimatePresence>
-            {generatedImage && (
+            {generatedImage && showImageOverlay && (
               <GeneratedImageOverlay
                 imageUrl={generatedImage}
-                onClose={() => setGeneratedImage(null)}
+                onClose={() => setShowImageOverlay(false)}
               />
             )}
           </AnimatePresence>
@@ -138,6 +116,7 @@ export default function App() {
               videoRef={videoRef}
               cameraFacing={cameraFacing}
               stageRef={stageRef}
+              onFlip={flipCamera}
             />
           </div>
 
@@ -192,10 +171,64 @@ export default function App() {
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 className="absolute inset-x-0 bottom-0 z-20 pointer-events-none"
-                style={{ paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom))' }}
+                style={{ paddingBottom: 'max(2rem, env(safe-area-inset-bottom))' }}
               >
-                <div className="flex justify-center pointer-events-auto">
-                  <Dock items={dockItems} iconSize={42} magnification={1.5} distance={80} />
+                <div className="flex items-center justify-center gap-8 pointer-events-auto">
+                  <button
+                    type="button"
+                    onClick={toggleMute}
+                    className="text-white/80 hover:text-white active:scale-90 transition-all touch-manipulation"
+                    style={{ WebkitTapHighlightColor: 'transparent' }}
+                  >
+                    {isMuted ? <MicOff size={26} className="text-red-400" /> : <Mic size={26} />}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="text-white/80 hover:text-white active:scale-90 transition-all touch-manipulation"
+                    style={{ WebkitTapHighlightColor: 'transparent' }}
+                  >
+                    <ImagePlus size={26} />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={disconnect}
+                    className="active:scale-90 transition-all touch-manipulation"
+                    style={{ WebkitTapHighlightColor: 'transparent' }}
+                  >
+                    <PhoneOff size={32} className="text-red-500" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleShare}
+                    className={cn(
+                      "transition-all active:scale-90 touch-manipulation",
+                      generatedImage ? "text-white/80 hover:text-white" : "text-white/20"
+                    )}
+                    style={{ WebkitTapHighlightColor: 'transparent' }}
+                  >
+                    <Share2 size={26} />
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={!generatedImage}
+                    onClick={() => setShowImageOverlay(true)}
+                    className="relative active:scale-90 transition-all touch-manipulation disabled:cursor-default"
+                    style={{ WebkitTapHighlightColor: 'transparent' }}
+                  >
+                    {generatedImage && !showImageOverlay ? (
+                      <>
+                        <BellRing size={26} className="text-white" />
+                        <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-green-400 rounded-full animate-pulse" />
+                      </>
+                    ) : (
+                      <Bell size={26} className="text-white/30" />
+                    )}
+                  </button>
                 </div>
               </motion.div>
             )}

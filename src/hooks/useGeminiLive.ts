@@ -299,9 +299,7 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
 
     if (videoRef.current.srcObject !== streamRef.current) {
       videoRef.current.srcObject = streamRef.current;
-      videoRef.current.play().catch((err) => {
-        console.error("Initial video play failed:", err);
-      });
+      void videoRef.current.play();
     }
 
     const canvas = canvasRef.current;
@@ -395,9 +393,7 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
 
     if (videoRef.current) {
       videoRef.current.srcObject = stream;
-      videoRef.current.play().catch((err) => {
-        console.error("Camera play failed:", err);
-      });
+      void videoRef.current.play();
     }
 
     const inputCtx = inputCtxRef.current!;
@@ -510,17 +506,12 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
 
       if (videoRef.current) {
         videoRef.current.srcObject = streamRef.current;
-        videoRef.current.play().catch((err) => {
-          console.error("Video play failed after flip:", err);
-        });
+        void videoRef.current.play();
       }
 
       if (isSessionOpenRef.current && isVideoEnabledRef.current) {
         startVideoCapture();
       }
-    } catch (err) {
-      console.error("Camera flip failed:", err);
-    }
   }, [startVideoCapture]);
 
   const disconnect = useCallback(() => {
@@ -535,11 +526,7 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
     const session = sessionRef.current;
     sessionRef.current = null;
     if (session) {
-      try {
-        session.close();
-      } catch (err) {
-        console.error("Error closing session:", err);
-      }
+      session.close();
     }
 
     setIsConnected(false);
@@ -701,7 +688,6 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
               manualDisconnectRef.current = false;
             },
             onerror: (error) => {
-              console.error("Live API Error:", error);
               isSessionOpenRef.current = false;
               resumptionHandleRef.current = null;
               endSessionTracking("socket_error");
@@ -721,7 +707,6 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
 
         sessionRef.current = session;
       } catch (err) {
-        console.error("Failed to connect:", err);
         isSessionOpenRef.current = false;
         cleanupMedia();
         resetPlayback();
