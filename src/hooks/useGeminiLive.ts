@@ -654,17 +654,15 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
                       } else {
                         try {
                           const parsed = JSON.parse(text);
-                          if (
-                            Array.isArray(parsed) &&
-                            parsed.length > 0 &&
-                            typeof parsed[0] === "string" &&
-                            parsed[0].startsWith("http")
-                          ) {
-                            setGeneratedImage(parsed[0]);
-                          }
+                          const url =
+                            // { img_url: "https://..." }
+                            (parsed?.img_url && typeof parsed.img_url === "string" && parsed.img_url) ||
+                            // ["https://..."]
+                            (Array.isArray(parsed) && typeof parsed[0] === "string" && parsed[0]);
+                          if (url && url.startsWith("http")) setGeneratedImage(url);
                         } catch (e) {
                           // Extract URL from mixed text as last resort
-                          const urlMatch = text.match(/https?:\/\/\S+/);
+                          const urlMatch = text.match(/https?:\/\/[^\s"')\]>]+/);
                           if (urlMatch) setGeneratedImage(urlMatch[0]);
                         }
                       }
