@@ -572,7 +572,7 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
         const tokenRes = await fetch('/api/session-token', { method: 'POST' });
         const { token: ephemeralToken, error: tokenError } = await tokenRes.json();
         if (!ephemeralToken) throw new Error(tokenError || 'Failed to get session token');
-        const ai = new GoogleGenAI({ apiKey: ephemeralToken });
+        const ai = new GoogleGenAI({ apiKey: ephemeralToken, httpOptions: { apiVersion: 'v1alpha' } });
 
         const model = personaConfig.model || "gemini-3.1-flash-live-preview";
 
