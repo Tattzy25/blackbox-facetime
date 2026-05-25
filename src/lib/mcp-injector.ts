@@ -35,12 +35,10 @@ export const mcpInjector = {
     toolEndpointMap.clear();
     cachedGeminiTools = [];
 
-    const raw = import.meta.env.VITE_MCP_ENDPOINTS as string | undefined;
-    if (!raw) return;
+    const urls = (import.meta.env.VITE_MCP_ENDPOINTS as string)
+      .split(",").map((u: string) => u.trim()).filter(Boolean);
 
-    const urls = raw.split(",").map((u) => u.trim()).filter(Boolean);
-
-    await Promise.all(
+    const results = await Promise.allSettled(
       urls.map(async (url) => {
         const tools = await fetchTools(url);
         for (const tool of tools) {
@@ -49,6 +47,9 @@ export const mcpInjector = {
         }
       }),
     );
+    results.forEach((r, i) => {
+      if (r.status === "rejected") console.warn(`MCP endpoint failed: ${urls[i]}`, r.reason);
+    });
   },
 
   disconnect: () => {

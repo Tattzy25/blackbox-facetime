@@ -541,7 +541,11 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
       try {
         setStatus("connecting");
         manualDisconnectRef.current = false;
-        await mcpInjector.connect();
+        try {
+          await mcpInjector.connect();
+        } catch {
+          // MCP unavailable — call continues without tools
+        }
         await initAudio();
         await startStreaming();
 

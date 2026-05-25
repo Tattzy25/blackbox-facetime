@@ -197,6 +197,7 @@ export const WreckShader: React.FC<WreckShaderProps> = ({ audioLevel, visualMode
     materialRef.current = material;
 
     const sphere = new THREE.Mesh(geometry, material);
+    sphere.scale.set(0.8, 0.8, 0.8);
     scene.add(sphere);
 
     // Animation loop
