@@ -330,10 +330,11 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
   }, [captureFrame, stopVideoCapture]);
 
   const initAudio = useCallback(async () => {
+    const base = window.location.origin;
     if (!inputCtxRef.current) {
       inputCtxRef.current = new AudioContext({ latencyHint: "interactive" });
       await inputCtxRef.current.audioWorklet.addModule(
-        "/audio-input-worklet.js",
+        `${base}/audio-input-worklet.js`,
       );
     }
 
@@ -343,7 +344,7 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
         latencyHint: "interactive",
       });
       await outputCtxRef.current.audioWorklet.addModule(
-        "/audio-output-worklet.js",
+        `${base}/audio-output-worklet.js`,
       );
     }
 
