@@ -91,7 +91,7 @@ export default function App() {
           className="flex-1 relative bg-black flex roast-gradient min-h-[100svh]"
         >
           {/* Orb — always behind everything */}
-          <div className="absolute inset-x-0 bottom-0 pointer-events-none z-0" style={{ top: '25%' }}>
+          <div className="absolute inset-0 pointer-events-none z-0">
             <WreckShader audioLevel={audioLevel} visualMode={visualMode} />
           </div>
 
@@ -139,9 +139,9 @@ export default function App() {
                   onClick={() => startConnection(selectedVoice)}
                   disabled={status === "connecting"}
                   className={cn(
-                    "relative flex items-center justify-center p-4 text-white",
+                    "relative flex items-center justify-center p-4 text-green-400",
                     "active:scale-95 transition-all duration-300 touch-manipulation",
-                    status === "connecting" ? "opacity-50 cursor-not-allowed" : "hover:scale-110 hover:text-zinc-300"
+                    status === "connecting" ? "opacity-50 cursor-not-allowed" : "hover:scale-110 hover:text-green-300"
                   )}
                   style={{ WebkitTapHighlightColor: 'transparent' }}
                 >
