@@ -91,7 +91,7 @@ export default function App() {
           className="flex-1 relative bg-black flex roast-gradient min-h-[100svh]"
         >
           {/* Orb — always behind everything */}
-          <div className="absolute inset-0 pointer-events-none z-0">
+          <div className="absolute inset-x-0 bottom-0 pointer-events-none z-0" style={{ top: '25%' }}>
             <WreckShader audioLevel={audioLevel} visualMode={visualMode} />
           </div>
 
@@ -134,23 +134,6 @@ export default function App() {
                 exit={{ opacity: 0 }}
                 className="absolute bottom-12 left-1/2 -translate-x-1/2 z-20 pointer-events-auto flex flex-col items-center gap-4"
               >
-                <div className="flex gap-2">
-                  {VOICES.map((voice) => (
-                    <button
-                      key={voice.id}
-                      type="button"
-                      onClick={() => setSelectedVoice(voice.id)}
-                      className={cn(
-                        "px-4 py-1.5 rounded-full text-sm font-medium transition-all duration-200 touch-manipulation",
-                        selectedVoice === voice.id
-                          ? "bg-white text-black"
-                          : "bg-white/10 text-white hover:bg-white/20"
-                      )}
-                    >
-                      {voice.label}
-                    </button>
-                  ))}
-                </div>
                 <button
                   type="button"
                   onClick={() => startConnection(selectedVoice)}
