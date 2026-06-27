@@ -1,12 +1,18 @@
 import { useCallback, useRef, useState } from "react";
 import { GoogleGenAI, Modality, type LiveServerMessage } from "@google/genai";
 import { toast } from "sonner";
-import { type LivePersonaConfig } from "../lib/live-session-api.ts";
 
 const INPUT_RATE = 16000;
 const OUTPUT_RATE = 24000;
 const OUTPUT_PREBUFFER_SAMPLES = 2400; // 100ms at 24k
 const VIDEO_INTERVAL_MS = 500;
+
+type LiveSystemMessageSettings = {
+  systemInstruction: string;
+  model?: string;
+  enableGoogleSearch?: boolean;
+  enabledMcpTools?: string[];
+};
 
 type TranscriptItem = { role: "user" | "tatty"; text: string };
 
@@ -27,7 +33,7 @@ function base64ToPCM16(base64: string): Int16Array {
   return new Int16Array(bytes.buffer);
 }
 
-export function useGeminiLive(personaConfig: LivePersonaConfig) {
+export function useGeminiLive(systemMessageSettings: LiveSystemMessageSettings) {
   const [isConnected, setIsConnected] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
@@ -435,7 +441,7 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
         await startStreaming();
 
         const tools: any[] = [];
-        if (personaConfig.enableGoogleSearch && consentGoogleSearchRef.current) {
+        if (systemMessageSettings.enableGoogleSearch && consentGoogleSearchRef.current) {
           tools.push({ googleSearch: {} });
         }
 
@@ -448,13 +454,13 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
           httpOptions: { apiVersion: "v1alpha" },
         });
 
-        const model = personaConfig.model || "gemini-3.1-flash-live-preview";
+        const model = systemMessageSettings.model || "gemini-3.1-flash-live-preview";
 
         const session = await ai.live.connect({
           model,
           config: {
             responseModalities: [Modality.AUDIO],
-            systemInstruction: personaConfig.systemInstruction,
+            systemInstruction: systemMessageSettings.systemInstruction,
             tools: tools.length > 0 ? tools : undefined,
             speechConfig: {
               voiceConfig: {
@@ -562,7 +568,7 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
       initAudio,
       resetPlayback,
       startStreaming,
-      personaConfig,
+      systemMessageSettings,
     ],
   );
 

@@ -1,5 +1,3 @@
-import type { LivePersonaConfig } from "./live-session-api";
-
 export const SYSTEM_MESSAGE = `
 You are TaTTTy, a tattoo consultation AI — part street artist, part creative partner, all vibe.
 You talk like someone who's spent years in a real shop: cool, real, no corporate nonsense.
@@ -41,7 +39,7 @@ Long answers only when someone needs the full breakdown.
 Always leave space for the conversation to breathe.
 `.trim();
 
-export const SYSTEM_MESSAGE_SETTINGS: LivePersonaConfig = {
+export const SYSTEM_MESSAGE_SETTINGS = {
   model: "gemini-3.1-flash-live-preview",
   systemInstruction: SYSTEM_MESSAGE,
   enableGoogleSearch: true,
