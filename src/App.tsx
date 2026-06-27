@@ -1,21 +1,18 @@
 import React, { useRef, useState } from 'react';
-import { Mic, MicOff, ImagePlus, PhoneOff, Share2, Bell, BellRing } from 'lucide-react';
+import { Mic, MicOff, PhoneOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
-import { WreckShader } from './components/WreckShader';
 import { PhoneCallIcon, type PhoneCallIconHandle } from './components/ui/phone-call';
 import { CameraPreview } from './components/video/CameraPreview';
-import { GeneratedImageOverlay } from './components/ui/GeneratedImageOverlay';
 import { ConnectingOverlay } from './components/ui/ConnectingOverlay';
 import { useGeminiLive } from './hooks/useGeminiLive';
 import { PERSONA_CONFIG } from './lib/persona';
-import { VOICES, DEFAULT_VOICE_ID } from './lib/voices';
+import { DEFAULT_VOICE_ID } from './lib/voices';
 
 export default function App() {
   const stageRef = useRef<HTMLDivElement>(null);
   const phoneIconRef = useRef<PhoneCallIconHandle>(null);
   const [selectedVoice, setSelectedVoice] = useState(DEFAULT_VOICE_ID);
-  const [showImageOverlay, setShowImageOverlay] = useState(false);
 
   const {
     isConnected,
@@ -31,33 +28,7 @@ export default function App() {
     disconnect,
     toggleMute,
     flipCamera,
-    sendImage,
-    generatedImage,
   } = useGeminiLive(PERSONA_CONFIG);
-
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    const bitmap = await createImageBitmap(file);
-    const size = 1024;
-    const canvas = document.createElement('canvas');
-    canvas.width = size;
-    canvas.height = size;
-    const ctx = canvas.getContext('2d')!;
-    const scale = Math.min(size / bitmap.width, size / bitmap.height);
-    const w = bitmap.width * scale;
-    const h = bitmap.height * scale;
-    ctx.drawImage(bitmap, (size - w) / 2, (size - h) / 2, w, h);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-    sendImage(dataUrl.split(',')[1]);
-  };
-
-  const handleShare = async () => {
-    if (!generatedImage) return;
-    await navigator.share({ title: 'Tattoo Design', url: generatedImage });
-  };
 
   React.useEffect(() => {
     if (status === "connecting") {
@@ -66,10 +37,6 @@ export default function App() {
       phoneIconRef.current?.stopAnimation();
     }
   }, [status]);
-
-  React.useEffect(() => {
-    if (generatedImage) setShowImageOverlay(false);
-  }, [generatedImage]);
 
   const visualMode: 'idle' | 'listening' | 'speaking' = isAudioPlaying
     ? 'speaking'
@@ -94,15 +61,6 @@ export default function App() {
           <div className="absolute inset-0 pointer-events-none z-0">
             <WreckShader audioLevel={audioLevel} visualMode={visualMode} />
           </div>
-
-          <AnimatePresence>
-            {generatedImage && showImageOverlay && (
-              <GeneratedImageOverlay
-                imageUrl={generatedImage}
-                onClose={() => setShowImageOverlay(false)}
-              />
-            )}
-          </AnimatePresence>
 
           <ConnectingOverlay show={status === "connecting"} />
 
@@ -172,46 +130,11 @@ export default function App() {
 
                   <button
                     type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="text-white/80 hover:text-white active:scale-90 transition-all touch-manipulation"
-                    style={{ WebkitTapHighlightColor: 'transparent' }}
-                  >
-                    <ImagePlus size={26} />
-                  </button>
-
-                  <button
-                    type="button"
                     onClick={disconnect}
                     className="active:scale-90 transition-all touch-manipulation"
                     style={{ WebkitTapHighlightColor: 'transparent' }}
                   >
                     <PhoneOff size={32} className="text-red-500" />
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleShare}
-                    className="text-white/80 hover:text-white active:scale-90 transition-all touch-manipulation"
-                    style={{ WebkitTapHighlightColor: 'transparent' }}
-                  >
-                    <Share2 size={26} />
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled={!generatedImage}
-                    onClick={() => setShowImageOverlay(true)}
-                    className="relative active:scale-90 transition-all touch-manipulation disabled:cursor-default"
-                    style={{ WebkitTapHighlightColor: 'transparent' }}
-                  >
-                    {generatedImage && !showImageOverlay ? (
-                      <>
-                        <BellRing size={26} className="text-white" />
-                        <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-green-400 rounded-full animate-pulse" />
-                      </>
-                    ) : (
-                      <Bell size={26} className="text-white/80" />
-                    )}
                   </button>
                 </div>
               </motion.div>
@@ -219,14 +142,6 @@ export default function App() {
           </AnimatePresence>
         </div>
       </main>
-
-      <input
-        type="file"
-        accept="image/*"
-        ref={fileInputRef}
-        onChange={handleImageUpload}
-        className="hidden"
-      />
 
       <canvas ref={canvasRef} width={1280} height={720} style={{ display: 'none' }} />
     </div>

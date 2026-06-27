@@ -1,13 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import { GoogleGenAI, Modality, type LiveServerMessage } from "@google/genai";
 import { toast } from "sonner";
-import { mcpInjector } from "../lib/mcp-injector";
-import {
-  endLiveSession,
-  heartbeatLiveSession,
-  type LivePersonaConfig,
-  startLiveSession,
-} from "../lib/live-session-api.ts";
+import { type LivePersonaConfig } from "../lib/live-session-api.ts";
 
 const INPUT_RATE = 16000;
 const OUTPUT_RATE = 24000;
@@ -37,17 +31,12 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
   const [isConnected, setIsConnected] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
-  const [cameraFacing, setCameraFacing] = useState<"user" | "environment">(
-    "user",
-  );
+  const [cameraFacing, setCameraFacing] = useState<"user" | "environment">("user");
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
   const [micVolume, setMicVolume] = useState(0);
   const [isUserTalking, setIsUserTalking] = useState(false);
-  const [status, setStatus] = useState<
-    "idle" | "connecting" | "live" | "error"
-  >("idle");
+  const [status, setStatus] = useState<"idle" | "connecting" | "live" | "error">("idle");
   const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
-  const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [sessionDurationMs, setSessionDurationMs] = useState(0);
   const [consentGoogleSearch, setConsentGoogleSearchState] = useState(false);
   const [consentTranscription, setConsentTranscriptionState] = useState(false);
@@ -78,10 +67,8 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
   const pendingOutputRef = useRef<Int16Array[]>([]);
   const pendingOutputSamplesRef = useRef(0);
   const playbackPrimedRef = useRef(false);
-  const liveSessionIdRef = useRef<string | null>(null);
-  const liveSessionStartedAtRef = useRef<number | null>(null);
+  const connectedAtRef = useRef<number | null>(null);
   const durationIntervalRef = useRef<number | null>(null);
-  const heartbeatIntervalRef = useRef<number | null>(null);
   const resumptionHandleRef = useRef<string | null>(null);
   const consentGoogleSearchRef = useRef(false);
   const consentTranscriptionRef = useRef(false);
@@ -96,101 +83,36 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
     setConsentTranscriptionState(value);
   }, []);
 
-  const stopSessionTrackingTimers = useCallback(() => {
+  const stopDurationTimer = useCallback(() => {
     if (durationIntervalRef.current) {
       window.clearInterval(durationIntervalRef.current);
       durationIntervalRef.current = null;
     }
-
-    if (heartbeatIntervalRef.current) {
-      window.clearInterval(heartbeatIntervalRef.current);
-      heartbeatIntervalRef.current = null;
-    }
   }, []);
 
   const syncSessionDuration = useCallback(() => {
-    if (!liveSessionStartedAtRef.current) {
+    if (!connectedAtRef.current) {
       setSessionDurationMs(0);
       return 0;
     }
-
-    const elapsedMs = Date.now() - liveSessionStartedAtRef.current;
+    const elapsedMs = Date.now() - connectedAtRef.current;
     setSessionDurationMs(elapsedMs);
     return elapsedMs;
   }, []);
 
-  const endSessionTracking = useCallback(
-    (reason: string) => {
-      stopSessionTrackingTimers();
+  const beginSessionTracking = useCallback(() => {
+    connectedAtRef.current = Date.now();
+    setSessionDurationMs(0);
+    durationIntervalRef.current = window.setInterval(() => {
+      syncSessionDuration();
+    }, 1000);
+  }, [syncSessionDuration]);
 
-      const sessionId = liveSessionIdRef.current;
-      const elapsedMs = syncSessionDuration();
-
-      liveSessionIdRef.current = null;
-      liveSessionStartedAtRef.current = null;
-
-      if (!sessionId) {
-        setSessionDurationMs(0);
-        return;
-      }
-
-      void endLiveSession({
-        sessionId,
-        elapsedMs,
-        reason,
-        metadata: {
-          muted: isMutedRef.current,
-          videoEnabled: isVideoEnabledRef.current,
-        },
-      });
-    },
-    [stopSessionTrackingTimers, syncSessionDuration],
-  );
-
-  const beginSessionTracking = useCallback(
-    (voice: string, model: string) => {
-      const sessionId = crypto.randomUUID();
-      const startedAtMs = Date.now();
-      const startedAt = new Date(startedAtMs).toISOString();
-
-      liveSessionIdRef.current = sessionId;
-      liveSessionStartedAtRef.current = startedAtMs;
-      setSessionDurationMs(0);
-
-      void startLiveSession({
-        sessionId,
-        personaId: personaConfig.personaId,
-        model,
-        voice,
-        startedAt,
-        metadata: {
-          cameraFacing: cameraFacingRef.current,
-          userAgent: navigator.userAgent,
-        },
-      });
-
-      durationIntervalRef.current = window.setInterval(() => {
-        syncSessionDuration();
-      }, 1000);
-
-      heartbeatIntervalRef.current = window.setInterval(() => {
-        const activeSessionId = liveSessionIdRef.current;
-        if (!activeSessionId) return;
-
-        void heartbeatLiveSession({
-          sessionId: activeSessionId,
-          elapsedMs: syncSessionDuration(),
-          muted: isMutedRef.current,
-          videoEnabled: isVideoEnabledRef.current,
-          metadata: {
-            cameraFacing: cameraFacingRef.current,
-            connected: isSessionOpenRef.current,
-          },
-        });
-      }, 15000);
-    },
-    [personaConfig.personaId, syncSessionDuration],
-  );
+  const endSessionTracking = useCallback(() => {
+    stopDurationTimer();
+    syncSessionDuration();
+    connectedAtRef.current = null;
+  }, [stopDurationTimer, syncSessionDuration]);
 
   const stopVideoCapture = useCallback(() => {
     if (videoIntervalRef.current) {
@@ -293,9 +215,7 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
       return;
     }
 
-    if (videoRef.current.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
-      return;
-    }
+    if (videoRef.current.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
 
     if (videoRef.current.srcObject !== streamRef.current) {
       videoRef.current.srcObject = streamRef.current;
@@ -317,25 +237,16 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
 
   const startVideoCapture = useCallback(() => {
     stopVideoCapture();
-
-    if (!isVideoEnabledRef.current || !streamRef.current) {
-      return;
-    }
-
+    if (!isVideoEnabledRef.current || !streamRef.current) return;
     captureFrame();
-    videoIntervalRef.current = window.setInterval(
-      captureFrame,
-      VIDEO_INTERVAL_MS,
-    );
+    videoIntervalRef.current = window.setInterval(captureFrame, VIDEO_INTERVAL_MS);
   }, [captureFrame, stopVideoCapture]);
 
   const initAudio = useCallback(async () => {
     const base = window.location.origin;
     if (!inputCtxRef.current) {
       inputCtxRef.current = new AudioContext({ latencyHint: "interactive" });
-      await inputCtxRef.current.audioWorklet.addModule(
-        `${base}/audio-input-worklet.js`,
-      );
+      await inputCtxRef.current.audioWorklet.addModule(`${base}/audio-input-worklet.js`);
     }
 
     if (!outputCtxRef.current) {
@@ -343,31 +254,21 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
         sampleRate: OUTPUT_RATE,
         latencyHint: "interactive",
       });
-      await outputCtxRef.current.audioWorklet.addModule(
-        `${base}/audio-output-worklet.js`,
-      );
+      await outputCtxRef.current.audioWorklet.addModule(`${base}/audio-output-worklet.js`);
     }
 
-    if (inputCtxRef.current.state === "suspended")
-      await inputCtxRef.current.resume();
-    if (outputCtxRef.current.state === "suspended")
-      await outputCtxRef.current.resume();
+    if (inputCtxRef.current.state === "suspended") await inputCtxRef.current.resume();
+    if (outputCtxRef.current.state === "suspended") await outputCtxRef.current.resume();
 
     if (!outputNodeRef.current) {
-      outputNodeRef.current = new AudioWorkletNode(
-        outputCtxRef.current,
-        "gemini-output-worklet",
-        {
-          numberOfInputs: 0,
-          numberOfOutputs: 1,
-          outputChannelCount: [1],
-        },
-      );
+      outputNodeRef.current = new AudioWorkletNode(outputCtxRef.current, "gemini-output-worklet", {
+        numberOfInputs: 0,
+        numberOfOutputs: 1,
+        outputChannelCount: [1],
+      });
 
       outputNodeRef.current.port.onmessage = (event) => {
-        if (event.data?.type === "underrun") {
-          setIsAudioPlaying(false);
-        }
+        if (event.data?.type === "underrun") setIsAudioPlaying(false);
       };
 
       outputNodeRef.current.connect(outputCtxRef.current.destination);
@@ -400,7 +301,6 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
     const inputCtx = inputCtxRef.current!;
     const source = inputCtx.createMediaStreamSource(stream);
 
-    // Setup AnalyserNode for mic volume
     const analyser = inputCtx.createAnalyser();
     analyser.fftSize = 256;
     source.connect(analyser);
@@ -411,10 +311,9 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
     const updateVolume = () => {
       if (!analyserRef.current) return;
       analyserRef.current.getByteFrequencyData(dataArray);
+
       let sum = 0;
-      for (let i = 0; i < dataArray.length; i++) {
-        sum += dataArray[i];
-      }
+      for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
       const avg = sum / dataArray.length;
       const volume = Math.min(1, avg / 128);
 
@@ -425,7 +324,6 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
       });
 
       setIsUserTalking((prev) => {
-        // Hysteresis to prevent split-second bouncing on background noise
         if (prev && volume < 0.1) return false;
         if (!prev && volume >= 0.15) return true;
         return prev;
@@ -458,12 +356,8 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
     silentGain.connect(inputCtx.destination);
 
     inputNode.port.onmessage = (event) => {
-      if (
-        isMutedRef.current ||
-        !sessionRef.current ||
-        !isSessionOpenRef.current
-      )
-        return;
+      if (isMutedRef.current || !sessionRef.current || !isSessionOpenRef.current) return;
+
       const pcm = new Int16Array(event.data);
       const base64Data = pcm16ToBase64(pcm);
 
@@ -481,8 +375,7 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
   const flipCamera = useCallback(async () => {
     if (!streamRef.current) return;
 
-    const nextFacing =
-      cameraFacingRef.current === "user" ? "environment" : "user";
+    const nextFacing = cameraFacingRef.current === "user" ? "environment" : "user";
     cameraFacingRef.current = nextFacing;
     setCameraFacing(nextFacing);
 
@@ -518,21 +411,17 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
     manualDisconnectRef.current = true;
     isSessionOpenRef.current = false;
     resumptionHandleRef.current = null;
-    endSessionTracking("manual_disconnect");
+    endSessionTracking();
     cleanupMedia();
     resetPlayback();
-    mcpInjector.disconnect();
 
     const session = sessionRef.current;
     sessionRef.current = null;
-    if (session) {
-      session.close();
-    }
+    if (session) session.close();
 
     setIsConnected(false);
     setStatus("idle");
     setTranscript([]);
-    setGeneratedImage(null);
     setSessionDurationMs(0);
   }, [cleanupMedia, endSessionTracking, resetPlayback]);
 
@@ -541,11 +430,7 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
       try {
         setStatus("connecting");
         manualDisconnectRef.current = false;
-        try {
-          await mcpInjector.connect();
-        } catch {
-          // MCP unavailable — call continues without tools
-        }
+
         await initAudio();
         await startStreaming();
 
@@ -553,15 +438,15 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
         if (personaConfig.enableGoogleSearch && consentGoogleSearchRef.current) {
           tools.push({ googleSearch: {} });
         }
-        const mcpTools = mcpInjector.getGeminiTools(personaConfig.enabledMcpTools);
-        if (mcpTools.length > 0) {
-          tools.push({ functionDeclarations: mcpTools });
-        }
 
-        const tokenRes = await fetch('/api/session-token', { method: 'POST' });
+        const tokenRes = await fetch("/api/session-token", { method: "POST" });
         const { token: ephemeralToken, error: tokenError } = await tokenRes.json();
-        if (!ephemeralToken) throw new Error(tokenError || 'Failed to get session token');
-        const ai = new GoogleGenAI({ apiKey: ephemeralToken, httpOptions: { apiVersion: 'v1alpha' } });
+        if (!ephemeralToken) throw new Error(tokenError || "Failed to get session token");
+
+        const ai = new GoogleGenAI({
+          apiKey: ephemeralToken,
+          httpOptions: { apiVersion: "v1alpha" },
+        });
 
         const model = personaConfig.model || "gemini-3.1-flash-live-preview";
 
@@ -590,7 +475,7 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
               setIsConnected(true);
               setStatus("live");
               resetPlayback();
-              beginSessionTracking(selectedVoice, model);
+              beginSessionTracking();
             },
             onmessage: async (message: LiveServerMessage) => {
               if (message.serverContent?.interrupted) {
@@ -602,22 +487,14 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
               }
 
               if (consentTranscriptionRef.current) {
-                const inputTranscript =
-                  message.serverContent?.inputTranscription?.text;
+                const inputTranscript = message.serverContent?.inputTranscription?.text;
                 if (inputTranscript) {
-                  setTranscript((prev) => [
-                    ...prev,
-                    { role: "user", text: inputTranscript },
-                  ]);
+                  setTranscript((prev) => [...prev, { role: "user", text: inputTranscript }]);
                 }
 
-                const outputTranscript =
-                  message.serverContent?.outputTranscription?.text;
+                const outputTranscript = message.serverContent?.outputTranscription?.text;
                 if (outputTranscript) {
-                  setTranscript((prev) => [
-                    ...prev,
-                    { role: "tatty", text: outputTranscript },
-                  ]);
+                  setTranscript((prev) => [...prev, { role: "tatty", text: outputTranscript }]);
                 }
               }
 
@@ -628,66 +505,21 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
                   enqueueOutputPCM(pcm);
                 }
                 if (part.text && consentTranscriptionRef.current) {
-                  setTranscript((prev) => [
-                    ...prev,
-                    { role: "tatty", text: part.text! },
-                  ]);
-                }
-              }
-
-              const toolCall = (message as any).toolCall;
-              if (toolCall?.functionCalls?.length) {
-                for (const fc of toolCall.functionCalls) {
-                  const { id: callId, name, args } = fc;
-                  if (!name) continue;
-                  try {
-                    const result = await mcpInjector.executeTool(name, args);
-
-                    if (result && typeof result.text === "string") {
-                      try {
-                        const parsed = JSON.parse(result.text.trim());
-                        const imageUrl = parsed?.img_url ?? (Array.isArray(parsed?.output) ? parsed.output[0] : null);
-                        if (imageUrl && typeof imageUrl === "string") {
-                          setGeneratedImage(imageUrl);
-                        }
-                      } catch {
-                        // result.text was not JSON — not an image response
-                      }
-                    }
-
-                    sessionRef.current?.sendToolResponse({
-                      functionResponses: [
-                        {
-                          id: callId,
-                          name,
-                          response: { result },
-                        },
-                      ],
-                    });
-                  } catch (error: any) {
-                    sessionRef.current?.sendToolResponse({
-                      functionResponses: [
-                        {
-                          id: callId,
-                          name,
-                          response: { error: error.message },
-                        },
-                      ],
-                    });
-                  }
+                  setTranscript((prev) => [...prev, { role: "tatty", text: part.text! }]);
                 }
               }
             },
             onclose: () => {
               isSessionOpenRef.current = false;
               resumptionHandleRef.current = null;
-              endSessionTracking("socket_closed");
+              endSessionTracking();
               cleanupMedia();
               resetPlayback();
               sessionRef.current = null;
               setIsConnected(false);
               setStatus("idle");
               setSessionDurationMs(0);
+
               if (!manualDisconnectRef.current) {
                 toast.error("Live session closed unexpectedly");
               }
@@ -696,7 +528,7 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
             onerror: (error) => {
               isSessionOpenRef.current = false;
               resumptionHandleRef.current = null;
-              endSessionTracking("socket_error");
+              endSessionTracking();
               cleanupMedia();
               resetPlayback();
               sessionRef.current = null;
@@ -704,9 +536,7 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
               setStatus("error");
               setSessionDurationMs(0);
               manualDisconnectRef.current = true;
-              toast.error(
-                error instanceof Error ? error.message : "Live API error",
-              );
+              toast.error(error instanceof Error ? error.message : "Live API error");
             },
           },
         });
@@ -721,11 +551,7 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
         setIsConnected(false);
         setSessionDurationMs(0);
         manualDisconnectRef.current = false;
-        toast.error(
-          err instanceof Error
-            ? err.message
-            : "Failed to start the live session",
-        );
+        toast.error(err instanceof Error ? err.message : "Failed to start the live session");
       }
     },
     [
@@ -774,14 +600,6 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
     });
   }, [startVideoCapture, stopVideoCapture]);
 
-  const sendImage = useCallback((base64Data: string) => {
-    if (sessionRef.current) {
-      sessionRef.current.sendRealtimeInput({
-        video: { data: base64Data, mimeType: "image/jpeg" },
-      });
-    }
-  }, []);
-
   return {
     isConnected,
     isMuted,
@@ -799,10 +617,7 @@ export function useGeminiLive(personaConfig: LivePersonaConfig) {
     toggleMute,
     toggleVideo,
     flipCamera,
-    sendImage,
     isVideoEnabled,
-    generatedImage,
-    setGeneratedImage,
     consentGoogleSearch,
     consentTranscription,
     setConsentGoogleSearch,

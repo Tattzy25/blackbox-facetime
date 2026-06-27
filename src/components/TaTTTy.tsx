@@ -1,12 +1,12 @@
 import React, { useRef, useEffect } from 'react';
 import * as THREE from 'three';
 
-interface WreckShaderProps {
+interface TaTTTyProps {
   audioLevel: number;
   visualMode: 'idle' | 'listening' | 'speaking';
 }
 
-export const WreckShader: React.FC<WreckShaderProps> = ({ audioLevel, visualMode }) => {
+export const WreckShader: React.FC<TaTTTyProps> = ({ audioLevel, visualMode }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const audioLevelRef = useRef(audioLevel);
   const visualModeRef = useRef(visualMode);
