@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef } from 'react';
 import { Mic, MicOff, PhoneOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
@@ -7,13 +7,11 @@ import { CameraPreview } from './components/video/CameraPreview';
 import { ConnectingOverlay } from './components/ui/ConnectingOverlay';
 import { WreckShader } from './components/WreckShader';
 import { useGeminiLive } from './hooks/useGeminiLive';
-import { PERSONA_CONFIG } from './lib/persona';
-import { DEFAULT_VOICE_ID } from './lib/voices';
+import { SYSTEM_MESSAGE_SETTINGS } from './lib/SystemMessage';
 
 export default function App() {
   const stageRef = useRef<HTMLDivElement>(null);
   const phoneIconRef = useRef<PhoneCallIconHandle>(null);
-  const [selectedVoice, setSelectedVoice] = useState(DEFAULT_VOICE_ID);
 
   const {
     isConnected,
@@ -29,7 +27,7 @@ export default function App() {
     disconnect,
     toggleMute,
     flipCamera,
-  } = useGeminiLive(PERSONA_CONFIG);
+  } = useGeminiLive(SYSTEM_MESSAGE_SETTINGS);
 
   React.useEffect(() => {
     if (status === "connecting") {
@@ -95,7 +93,7 @@ export default function App() {
               >
                 <button
                   type="button"
-                  onClick={() => startConnection(selectedVoice)}
+                  onClick={() => startConnection("Aoede")}
                   disabled={status === "connecting"}
                   className={cn(
                     "relative flex items-center justify-center p-4 text-green-400",

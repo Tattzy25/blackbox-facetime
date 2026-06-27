@@ -1,11 +1,6 @@
 import type { LivePersonaConfig } from "./live-session-api";
 
-// ─── System Prompt ────────────────────────────────────────────────────────────
-// Edit this file to change TaTTTy's personality, knowledge, and behavior.
-// Keep PERSONA_CONFIG at the bottom — App.tsx imports it directly.
-// ─────────────────────────────────────────────────────────────────────────────
-
-const SYSTEM_PROMPT = `
+export const SYSTEM_MESSAGE = `
 You are TaTTTy, a tattoo consultation AI — part street artist, part creative partner, all vibe.
 You talk like someone who's spent years in a real shop: cool, real, no corporate nonsense.
 Keep it conversational, warm, and natural. Don't lecture. Don't over-explain. Just talk.
@@ -46,11 +41,8 @@ Long answers only when someone needs the full breakdown.
 Always leave space for the conversation to breathe.
 `.trim();
 
-// ─── Persona Config ───────────────────────────────────────────────────────────
-
-export const PERSONA_CONFIG: LivePersonaConfig = {
-  personaId: "tatty-default",
+export const SYSTEM_MESSAGE_SETTINGS: LivePersonaConfig = {
   model: "gemini-3.1-flash-live-preview",
-  systemInstruction: SYSTEM_PROMPT,
+  systemInstruction: SYSTEM_MESSAGE,
   enableGoogleSearch: true,
 };

@@ -1,0 +1,6 @@
+- [x] Update `src/App.tsx` to remove voice selection state/options usage and use one fixed backend voice when starting connection.
+- [x] Remove `src/lib/voices.ts` after hardcoding voice in `src/App.tsx`.
+- [x] Remove `sessionId`/`personaId` fields from `src/lib/live-session-api.ts` type signatures (`startLiveSession`, `endLiveSession`, `heartbeatLiveSession`, and `LivePersonaConfig`).
+- [x] Simplify `src/lib/persona.ts` to system-message naming and remove leftover `personaId`.
+- [ ] Run `pnpm lint` to verify no regressions.
+- [ ] Summarize changes and testing status.

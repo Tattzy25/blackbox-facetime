@@ -1,0 +1,1187 @@
+No but my thing is how do we make it dynamic so when I launch it as a Shopify marketplace app when you're merchant as soon as the merchant installs it automatically I guess I don't know maybe the API or a graph QL or whatever it's gonna be detects the merchants products discounts et cetera Another facetime orb is comfortable enough to sell to users and convert I'm telling you people are going to use this fucking facetime just for the experience at least once and nine out of 10 are going to buy something
+The way you’re thinking about this is exactly right: once this is on the Shopify App Store, you want the orb to be able to drop into any merchant’s store, instantly know their products/discounts, and start selling without you manually wiring anything per shop.
+
+You can do that. The key is: the Storefront MCP server already gives you a live view of that merchant’s catalog, prices, and discounts; your job is just to wire your app so that, on install, it knows:
+
+“I’m running for shop X”
+“Here is shop X’s Storefront MCP endpoint”
+“Use that when Gemini calls scope: 'storefront'”
+Docs you’re implicitly building on:
+
+Storefront MCP: About Storefront MCP
+Storefront MCP server details: Storefront MCP server
+Storefront Catalog MCP (how catalog tools are shaped): Storefront Catalog MCP
+UCP agent profiles & capabilities: Agent profiles and UCP negotiation
+Let’s walk the “dynamic app in the marketplace” path end‑to‑end.
+
+1. Big picture: what happens when a merchant installs FaceTimefy
+When FaceTimefy is a public app on the Shopify App Store and a merchant installs it:
+
+Shopify sends your backend an app install callback with:
+
+The shop domain: e.g. coolbrand.myshopify.com
+A code you exchange for a permanent access token
+Your backend stores a row in your DB like:
+
+json
+Copy
+   {
+     "shop_domain": "coolbrand.myshopify.com",
+     "access_token": "<shopify-access-token>",
+     "storefront_mcp_url": "<will-be-filled-or-derived>",
+     "order_mcp_url": "<optional, later>",
+     "customer_accounts_mcp_url": "<optional, later>",
+     "created_at": "...",
+     "updated_at": "..."
+   }
+   {
+     "shop_domain": "coolbrand.myshopify.com",
+     "access_token": "<shopify-access-token>",
+     "storefront_mcp_url": "<will-be-filled-or-derived>",
+     "order_mcp_url": "<optional, later>",
+     "customer_accounts_mcp_url": "<optional, later>",
+     "created_at": "...",
+     "updated_at": "..."
+   }
+From then on, whenever the orb is running in CoolBrand’s context, your backend knows:
+Which shop it is (coolbrand.myshopify.com)
+Which MCP servers to call for that shop
+You do not need to pre‑crawl their products, discounts, or re‑index their catalog unless you want extra optimization; MCP gives you a live view.
+
+2. How the catalog & discounts stay dynamic
+This is the part you’re worried about: “How does the orb automatically know what this merchant sells and what discounts they have?”
+
+With UCP + Storefront MCP, you don’t hard‑code any of that per shop:
+
+Products & variants → come from MCP search_catalog, lookup_catalog, get_product tools for that store.
+Storefront Catalog MCP
+
+Discounts & dynamic prices → appear naturally through:
+
+Cart tools (create_cart, update_cart)
+Checkout tools (create_checkout, update_checkout)
+Totals in the UCP responses (merchant already applies their rules)
+So your FaceTimefy app just:
+
+Calls Storefront MCP for search_catalog to show products.
+Uses cart & checkout tools to get real prices/totals with discounts applied.
+Lets the orb talk from that live state.
+You never need to manually detect “this merchant has 10% off” – the MCP tools return those numbers when you build carts/checkouts.
+
+3. The dynamic wiring: per‑shop MCP endpoint + Gemini function
+3.1. Per‑shop config table
+Create a simple table like:
+
+ts
+Copy
+type ShopConfig = {
+  shopDomain: string;           // coolbrand.myshopify.com
+  accessToken: string;
+  storefrontMcpUrl: string;     // the Storefront MCP server endpoint for this shop
+  orderMcpUrl?: string;         // later, for Order MCP
+  customerAccountsMcpUrl?: string;
+  ucpProfileUrl: string;        // your hosted UCP profile for the orb
+};
+type ShopConfig = {
+  shopDomain: string;           // coolbrand.myshopify.com
+  accessToken: string;
+  storefrontMcpUrl: string;     // the Storefront MCP server endpoint for this shop
+  orderMcpUrl?: string;         // later, for Order MCP
+  customerAccountsMcpUrl?: string;
+  ucpProfileUrl: string;        // your hosted UCP profile for the orb
+};
+On install, you:
+
+Save shopDomain
+Save accessToken
+Compute or retrieve storefrontMcpUrl for that shop (the docs show how the Storefront MCP is exposed for each store)
+Set ucpProfileUrl to something like https://facetimefy.com/ucp/profiles/orb-agent-2026-04-08.json
+Now you’ve got enough to route.
+
+3.2. Tell Gemini “scope: storefront” means “this shop’s MCP server”
+Your function declaration is already good:
+
+json
+Copy
+{
+  "name": "shopifyStorefrontMcpCall",
+  "description": "Call Shopify UCP MCP servers (storefront, global catalog, etc.) to search catalog, manage carts, and handle checkout.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "scope": {
+        "type": "string",
+        "enum": ["storefront", "global_catalog"],
+        "description": "Which MCP server to call. 'storefront' = this merchant's Storefront MCP. 'global_catalog' = Shopify global catalog MCP."
+      },
+      "tool_name": {
+        "type": "string",
+        "description": "The MCP tool name to call, e.g. 'search_catalog', 'create_cart', 'update_checkout'."
+      },
+      "arguments": {
+        "type": "object",
+        "description": "The UCP MCP arguments object. Must include the correct catalog/cart/checkout shapes for the chosen tool."
+      }
+    },
+    "required": ["scope", "tool_name", "arguments"]
+  }
+}
+{
+  "name": "shopifyStorefrontMcpCall",
+  "description": "Call Shopify UCP MCP servers (storefront, global catalog, etc.) to search catalog, manage carts, and handle checkout.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "scope": {
+        "type": "string",
+        "enum": ["storefront", "global_catalog"],
+        "description": "Which MCP server to call. 'storefront' = this merchant's Storefront MCP. 'global_catalog' = Shopify global catalog MCP."
+      },
+      "tool_name": {
+        "type": "string",
+        "description": "The MCP tool name to call, e.g. 'search_catalog', 'create_cart', 'update_checkout'."
+      },
+      "arguments": {
+        "type": "object",
+        "description": "The UCP MCP arguments object. Must include the correct catalog/cart/checkout shapes for the chosen tool."
+      }
+    },
+    "required": ["scope", "tool_name", "arguments"]
+  }
+}
+Your handler then does:
+
+ts
+Copy
+async function shopifyStorefrontMcpCallForSession(
+  session: { shopDomain: string },
+  args: { scope: string; tool_name: string; arguments: any }
+) {
+  const { scope, tool_name, arguments: mcpArgs } = args;
+
+  const shopConfig = await loadShopConfig(session.shopDomain);
+  if (!shopConfig) throw new Error('Unknown shop: ' + session.shopDomain);
+
+  let mcpEndpoint: string;
+
+  if (scope === 'storefront') {
+    // Per-merchant Storefront MCP URL
+    mcpEndpoint = shopConfig.storefrontMcpUrl;
+  } else if (scope === 'global_catalog') {
+    // Shopify global UCP catalog MCP
+    mcpEndpoint = 'https://catalog.shopify.com/api/ucp/mcp';
+  } else {
+    throw new Error('Unknown scope: ' + scope);
+  }
+
+  const argsWithProfile = {
+    ...mcpArgs,
+    meta: {
+      ...(mcpArgs.meta || {}),
+      'ucp-agent': {
+        profile: shopConfig.ucpProfileUrl,
+        ...(mcpArgs.meta?.['ucp-agent'] || {})
+      }
+    }
+  };
+
+  const body = {
+    jsonrpc: '2.0',
+    method: 'tools/call',
+    id: Date.now(),
+    params: {
+      name: tool_name,
+      arguments: argsWithProfile
+    }
+  };
+
+  const response = await fetch(mcpEndpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'MCP-Protocol-Version': '2026-03-26',
+      Accept: 'application/json'
+    },
+    body: JSON.stringify(body)
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`MCP request failed: ${response.status} ${text}`);
+  }
+
+  return await response.json();
+}
+async function shopifyStorefrontMcpCallForSession(
+  session: { shopDomain: string },
+  args: { scope: string; tool_name: string; arguments: any }
+) {
+  const { scope, tool_name, arguments: mcpArgs } = args;
+
+  const shopConfig = await loadShopConfig(session.shopDomain);
+  if (!shopConfig) throw new Error('Unknown shop: ' + session.shopDomain);
+
+  let mcpEndpoint: string;
+
+  if (scope === 'storefront') {
+    // Per-merchant Storefront MCP URL
+    mcpEndpoint = shopConfig.storefrontMcpUrl;
+  } else if (scope === 'global_catalog') {
+    // Shopify global UCP catalog MCP
+    mcpEndpoint = 'https://catalog.shopify.com/api/ucp/mcp';
+  } else {
+    throw new Error('Unknown scope: ' + scope);
+  }
+
+  const argsWithProfile = {
+    ...mcpArgs,
+    meta: {
+      ...(mcpArgs.meta || {}),
+      'ucp-agent': {
+        profile: shopConfig.ucpProfileUrl,
+        ...(mcpArgs.meta?.['ucp-agent'] || {})
+      }
+    }
+  };
+
+  const body = {
+    jsonrpc: '2.0',
+    method: 'tools/call',
+    id: Date.now(),
+    params: {
+      name: tool_name,
+      arguments: argsWithProfile
+    }
+  };
+
+  const response = await fetch(mcpEndpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'MCP-Protocol-Version': '2026-03-26',
+      Accept: 'application/json'
+    },
+    body: JSON.stringify(body)
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`MCP request failed: ${response.status} ${text}`);
+  }
+
+  return await response.json();
+}
+Now it’s fully dynamic:
+
+Any merchant installs your app.
+Their Storefront MCP endpoint is recorded.
+Orb session for that merchant → scope: 'storefront' → correct MCP server.
+Products, prices, discounts, policies = live from that store at call time.
+4. What about “detects products, discounts, etc.” at install time?
+You can do some extra work at install if you want:
+
+On install (or first run), you could:
+Run a baseline search_catalog via storefront MCP to warm up what the merchant sells.
+Or call Shop Admin REST/GraphQL APIs to read products, collections, discount codes, automatic discounts, etc.
+But you don’t have to for the orb to work:
+
+The MCP layer already reads from the live store data:
+Products come from the store’s catalog.
+Discounts are baked into prices and totals when you build carts and checkouts.
+Your orb can explore products on demand as the user talks (“what do you sell?”, “show me X”).
+The main thing you need at install is just enough config to route MCP calls.
+
+5. How this feels to the merchant
+From a merchant’s POV when this is in the app store:
+
+They click “Install FaceTimefy” → OAuth → app is installed.
+Your app:
+Stores their shop_domain and token.
+Resolved their Storefront MCP endpoint.
+On their storefront (or headless Hydrogen site), you render your orb:
+The orb knows which shop (via URL, JWT, or Shopify App Bridge context).
+Your backend uses that to pick the right shopConfig.
+Gemini uses scope: 'storefront' tools to operate only on that merchant’s data.
+Merchant didn’t need to configure any “catalog” inside your app. It just automatically works against their own store the minute they install it.
+
+6. Answering your exact worry, directly
+“How do we make it dynamic so when I launch it as a Shopify marketplace app, as soon as the merchant installs it, it automatically detects the merchant’s products, discounts, etc., so the FaceTime orb is comfortable enough to sell?”
+
+You do not hard‑code or pre‑index per‑merchant:
+
+Dynamic is built‑in:
+On each session, you know which shop it is (shop_domain).
+For that shop, you know which Storefront MCP URL to call.
+Storefront MCP is the live adapter to that merchant’s catalog, pricing, and policies.
+All FaceTimefy has to do is:
+
+Save shopDomain + storefrontMcpUrl on install.
+In your Gemini function handler, route scope: 'storefront' calls to that URL.
+Use create_cart / create_checkout to let the merchant’s discount logic do its thing.
+If you want, I can next:
+
+Sketch the Shopify app install side (the exact fields you store on install), or
+Design the orb’s first‑run behavior in a new shop (how it introspects what the merchant sells and introduces itself to their customers).
+Sources
+Apps > Build > Storefront Mcp
+About Storefront MCP
+Apps > Build > Storefront Mcp > Servers > Storefront
+Storefront MCP server
+Agents > Catalog > Storefront Catalog
+Storefront Catalog MCP
+show 1 more
+Was this answer useful?
+
+Yes
+
+No
+So each merchant merchant that installs automatically goes into a semantic database instead of old school database I'm not worried about how to orbose what the merchant sells honest to God I could even give the merchant a free fucking search bar to place anywhere on their website that will be indexed within seconds anybody searching that search bar the results are the entire freaking shop in their entire products within seconds I could give that shit for free if anything even though it's going to cost me yes obviously but if that's going to be a catch I mean the fucking facetime is already a catch I'll even include that freaking search bar you don't even need a search bar at this point My problem right now what code do I write where to connect this together all we're doing is talking about it we're on repeat okay cool we're done talking about it what do I fucking place into jim and I right now where do I place the other code where it detects what store it's on what code do I put that it detects what store it's on to detect the MCPURL for that store like the real I'm talking about the real questions i'm not talking about the same thing you've been mentioning over and over and over and over again I understand that same shit I get it don't forget I have like three stores II literally have three customers i'll be i'll be my first three customers You see you're stopping at the most important places you're just stopping and not talking about it or not showing it to me what if the user doesn't even know about this agent take commerce the user hasn't fucking doesn't even have commerce agentic or whatever installed but saw my facetime and decided to install it now what???
+
+I'm asking you real questions I need onboarding and I need coding from the back i'm not telling you to build my build this shit but just guide me to the right directions
+You’re right to be pissed if all you’re getting is “high level” on repeat. You’re asking for exact wiring:
+
+Where do I put the function declaration in Gemini?
+Where do I put the code that figures out “what shop is this?” when the orb is live on their site?
+Where do I put the code that maps that shop → the MCP URL for that shop → actually calls Shopify?
+So I’ll stop re-explaining what MCP is and give you actual, minimal code paths.
+
+I’ll assume:
+
+Backend in Node/TypeScript (easy to translate).
+You have or will have a Shopify app (public app) installed on shops.
+You can host JS on https://facetimefy.com/orb.js and an API backend on https://api.facetimefy.com.
+0. Clarify two critical points up front
+Merchants do NOT need “agentic commerce” or UCP CLI installed.
+Shopify’s MCP/UCP support is on the platform side. If they install your app:
+
+Your app gets their shop_domain.
+You configure which MCP endpoints to hit.
+That’s it. They don’t install any CLI.
+“Semantic database vs old database” is your internal business. For this wiring, all you need is:
+shop_domain → shopConfig (you can back that with Postgres, vector DB, whatever).
+
+1. Frontend: how the orb knows what store it’s on
+You need one piece of data from the storefront into your backend: the shop’s domain.
+
+1.1. Theme App Extension (or snippet) Liquid
+In your Shopify app, create a Theme App Extension that the merchant can add to their theme. That extension renders something like:
+
+liquid
+Copy
+<div
+  id="facetimefy-orb"
+  data-shop-domain="{{ shop.permanent_domain }}"
+></div>
+<script src="https://facetimefy.com/orb.js" async></script>
+<div
+  id="facetimefy-orb"
+  data-shop-domain="{{ shop.permanent_domain }}"
+></div>
+<script src="https://facetimefy.com/orb.js" async></script>
+If you don’t want to deal with Theme App Extensions yet, you can also inject a script tag from the app (Theme API / ScriptTag API), but the idea is the same:
+
+{{ shop.permanent_domain }} is the real canonical shop domain (e.g. facetimefy.myshopify.com, coolbrand.myshopify.com).
+You stick that into a data-* attribute.
+1.2. orb.js: read shop and open a live session
+https://facetimefy.com/orb.js:
+
+javascript
+Copy
+(function () {
+  const mount = document.getElementById('facetimefy-orb');
+  if (!mount) return;
+
+  const shopDomain = mount.dataset.shopDomain;
+  if (!shopDomain) return;
+
+  // Render your 3D orb UI here however you do it…
+  // Then open a WebSocket / SSE / HTTP stream to your backend:
+  const ws = new WebSocket(
+    `wss://api.facetimefy.com/live?shop=${encodeURIComponent(shopDomain)}`
+  );
+
+  ws.onopen = () => {
+    console.log('FaceTimefy live session started for', shopDomain);
+    // Start streaming audio/video events etc. to your backend here
+  };
+
+  ws.onmessage = (event) => {
+    // Incoming events from your backend / Gemini:
+    const msg = JSON.parse(event.data);
+    // e.g. { type: 'speech', text: 'Hi, how can I help you shop today?' }
+    // You turn this into TTS / orb animations.
+  };
+
+  ws.onerror = (err) => {
+    console.error('FaceTimefy websocket error', err);
+  };
+
+  ws.onclose = () => {
+    console.log('FaceTimefy live session ended');
+  };
+})();
+(function () {
+  const mount = document.getElementById('facetimefy-orb');
+  if (!mount) return;
+
+  const shopDomain = mount.dataset.shopDomain;
+  if (!shopDomain) return;
+
+  // Render your 3D orb UI here however you do it…
+  // Then open a WebSocket / SSE / HTTP stream to your backend:
+  const ws = new WebSocket(
+    `wss://api.facetimefy.com/live?shop=${encodeURIComponent(shopDomain)}`
+  );
+
+  ws.onopen = () => {
+    console.log('FaceTimefy live session started for', shopDomain);
+    // Start streaming audio/video events etc. to your backend here
+  };
+
+  ws.onmessage = (event) => {
+    // Incoming events from your backend / Gemini:
+    const msg = JSON.parse(event.data);
+    // e.g. { type: 'speech', text: 'Hi, how can I help you shop today?' }
+    // You turn this into TTS / orb animations.
+  };
+
+  ws.onerror = (err) => {
+    console.error('FaceTimefy websocket error', err);
+  };
+
+  ws.onclose = () => {
+    console.log('FaceTimefy live session ended');
+  };
+})();
+Now every orb instance on any merchant’s shop automatically tells your backend:
+
+“Hi, I’m live for shop=facetimefy.myshopify.com”
+or
+“Hi, I’m live for shop=coolbrand.myshopify.com”
+That’s the core of “detect what store it’s on.”
+
+2. Backend: store config when the app is installed
+You need a Shopify app with OAuth. When the merchant installs it, Shopify calls your /auth/callback with shop and code. You exchange code for an access token and save it.
+
+2.1. Example install callback (Node/Express, super simplified)
+typescript
+Copy
+import express from 'express';
+import fetch from 'node-fetch';
+
+const app = express();
+
+// Replace with your real secrets
+const SHOPIFY_API_KEY = process.env.SHOPIFY_API_KEY!;
+const SHOPIFY_API_SECRET = process.env.SHOPIFY_API_SECRET!;
+const APP_URL = 'https://api.facetimefy.com';
+
+interface ShopConfig {
+  shopDomain: string;
+  accessToken: string;
+  storefrontMcpUrl: string;
+  ucpProfileUrl: string;
+}
+
+// Fake in-memory store – replace with DB
+const shops = new Map<string, ShopConfig>();
+
+app.get('/auth/callback', async (req, res) => {
+  const { shop, code } = req.query as { shop?: string; code?: string };
+  if (!shop || !code) {
+    return res.status(400).send('Missing shop or code');
+  }
+
+  // Exchange code for access token
+  const tokenRes = await fetch(
+    `https://${shop}/admin/oauth/access_token`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        client_id: SHOPIFY_API_KEY,
+        client_secret: SHOPIFY_API_SECRET,
+        code
+      })
+    }
+  );
+  const tokenJson = (await tokenRes.json()) as { access_token: string };
+  const accessToken = tokenJson.access_token;
+
+  // TODO: determine the Storefront MCP URL for this shop.
+  // For illustration, treat it as a derived URL or config:
+  const storefrontMcpUrl = `https://${shop}/apps/facetimefy-mcp`; // placeholder – follow Storefront MCP docs to get the real one.
+
+  const ucpProfileUrl =
+    'https://facetimefy.com/ucp/profiles/orb-agent-2026-04-08.json';
+
+  const shopConfig: ShopConfig = {
+    shopDomain: shop,
+    accessToken,
+    storefrontMcpUrl,
+    ucpProfileUrl
+  };
+
+  shops.set(shop, shopConfig);
+
+  // Redirect merchant back to your app UI or a success page
+  res.redirect(`${APP_URL}/installed?shop=${encodeURIComponent(shop)}`);
+});
+
+app.listen(3000, () => {
+  console.log('Auth callback listening on 3000');
+});
+import express from 'express';
+import fetch from 'node-fetch';
+
+const app = express();
+
+// Replace with your real secrets
+const SHOPIFY_API_KEY = process.env.SHOPIFY_API_KEY!;
+const SHOPIFY_API_SECRET = process.env.SHOPIFY_API_SECRET!;
+const APP_URL = 'https://api.facetimefy.com';
+
+interface ShopConfig {
+  shopDomain: string;
+  accessToken: string;
+  storefrontMcpUrl: string;
+  ucpProfileUrl: string;
+}
+
+// Fake in-memory store – replace with DB
+const shops = new Map<string, ShopConfig>();
+
+app.get('/auth/callback', async (req, res) => {
+  const { shop, code } = req.query as { shop?: string; code?: string };
+  if (!shop || !code) {
+    return res.status(400).send('Missing shop or code');
+  }
+
+  // Exchange code for access token
+  const tokenRes = await fetch(
+    `https://${shop}/admin/oauth/access_token`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        client_id: SHOPIFY_API_KEY,
+        client_secret: SHOPIFY_API_SECRET,
+        code
+You will replace:
+
+storefrontMcpUrl assignment with whatever Shopify tells you the Storefront MCP endpoint format is (see Storefront MCP server docs). The exact URL pattern is defined there.
+Point: once on install, you create a ShopConfig and store it in your DB.
+
+3. Backend: when an orb connects (live session)
+Now we go back to your wss://api.facetimefy.com/live?shop=... endpoint.
+
+3.1. Basic WebSocket server that ties a session to a shop
+Pseudocode (Node/TypeScript):
+
+typescript
+Copy
+import WebSocket, { WebSocketServer } from 'ws';
+
+const wss = new WebSocketServer({ noServer: true });
+
+// Assume you share the same `shops` Map from above
+
+wss.on('connection', (ws, request) => {
+  const url = new URL(request.url!, 'https://api.facetimefy.com');
+  const shopDomain = url.searchParams.get('shop');
+  if (!shopDomain) {
+    ws.close(1008, 'Missing shop');
+    return;
+  }
+
+  const shopConfig = shops.get(shopDomain);
+  if (!shopConfig) {
+    ws.close(1008, 'Unknown shop');
+    return;
+  }
+
+  console.log('New orb session for', shopDomain);
+
+  // Here you create a Gemini Live session and pass in functionDeclarations
+  startGeminiLiveSession(ws, shopConfig);
+});import WebSocket, { WebSocketServer } from 'ws';
+
+const wss = new WebSocketServer({ noServer: true });
+
+// Assume you share the same `shops` Map from above
+
+wss.on('connection', (ws, request) => {
+  const url = new URL(request.url!, 'https://api.facetimefy.com');
+  const shopDomain = url.searchParams.get('shop');
+  if (!shopDomain) {
+    ws.close(1008, 'Missing shop');
+    return;
+  }
+
+  const shopConfig = shops.get(shopDomain);
+  if (!shopConfig) {
+    ws.close(1008, 'Unknown shop');
+    return;
+  }
+
+  console.log('New orb session for', shopDomain);
+
+  // Here you create a Gemini Live session and pass in functionDeclarations
+  startGeminiLiveSession(ws, shopConfig);
+});
+You’ll need HTTP server upgrade handling to attach wss to your Express server, but this is the core: each WebSocket has a shopConfig.
+
+Now any Gemini function call for that WS knows which shop it’s for.
+
+4. Gemini functionDeclarations: where to put them
+Gemini’s functionDeclarations live in the session / model config you send when you start the live session.
+
+It will look something like (pseudo):
+
+typescript
+Copy
+const functionDeclarations = [
+  {
+    name: 'shopifyStorefrontMcpCall',
+    description:
+      'Call Shopify UCP MCP servers (storefront or global catalog) to search catalog, manage carts, and handle checkout.',
+    parameters: {
+      type: 'object',
+      properties: {
+        scope: {
+          type: 'string',
+          enum: ['storefront', 'global_catalog'],
+          description:
+            "Which MCP server to call. 'storefront' = this merchant's Storefront MCP. 'global_catalog' = Shopify global catalog MCP."
+        },
+        tool_name: {
+          type: 'string',
+          description:
+            "The MCP tool name to call, e.g. 'search_catalog', 'lookup_catalog', 'create_cart', 'update_checkout'."
+        },
+        arguments: {
+          type: 'object',
+          description:
+            'The UCP MCP arguments object. Must include the correct shapes for the chosen tool.'
+        }
+      },
+      required: ['scope', 'tool_name', 'arguments']
+    }
+  }
+];const functionDeclarations = [
+  {
+    name: 'shopifyStorefrontMcpCall',
+    description:
+      'Call Shopify UCP MCP servers (storefront or global catalog) to search catalog, manage carts, and handle checkout.',
+    parameters: {
+      type: 'object',
+      properties: {
+        scope: {
+          type: 'string',
+          enum: ['storefront', 'global_catalog'],
+          description:
+            "Which MCP server to call. 'storefront' = this merchant's Storefront MCP. 'global_catalog' = Shopify global catalog MCP."
+        },
+        tool_name: {
+          type: 'string',
+          description:
+            "The MCP tool name to call, e.g. 'search_catalog', 'lookup_catalog', 'create_cart', 'update_checkout'."
+        },
+        arguments: {
+          type: 'object',
+          description:
+            'The UCP MCP arguments object. Must include the correct shapes for the chosen tool.'
+        }
+      },
+      required: ['scope', 'tool_name', 'arguments']
+    }
+  }
+];
+How you pass that into Gemini depends on your client library, but usually you provide tools or functionDeclarations when you create the streaming session.
+
+5. Gemini function handler: actually calling the MCP URL
+This is the part you kept asking for: what code actually hits the MCP endpoint?
+
+Here’s a concrete handler you can call anytime Gemini emits a function call:
+
+typescript
+Copy
+import fetch from 'node-fetch';
+
+async function handleShopifyStorefrontMcpCall(
+  shopConfig: ShopConfig,
+  args: { scope: string; tool_name: string; arguments: any }
+) {
+  const { scope, tool_name, arguments: mcpArgs } = args;
+
+  let mcpEndpoint: string;
+
+  if (scope === 'global_catalog') {
+    mcpEndpoint = 'https://catalog.shopify.com/api/ucp/mcp';
+  } else if (scope === 'storefront') {
+    mcpEndpoint = shopConfig.storefrontMcpUrl;
+  } else {
+    throw new Error('Unknown scope: ' + scope);
+  }
+
+  const argsWithProfile = {
+    ...mcpArgs,
+    meta: {
+      ...(mcpArgs.meta || {}),
+      'ucp-agent': {
+        profile: shopConfig.ucpProfileUrl,
+        ...(mcpArgs.meta?.['ucp-agent'] || {})
+      }
+    }
+  };
+
+  const body = {
+    jsonrpc: '2.0',
+    method: 'tools/call',
+    id: Date.now(),
+    params: {
+      name: tool_name,
+      arguments: argsWithProfile
+    }
+  };
+
+  const response = await fetch(mcpEndpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'MCP-Protocol-Version': '2026-03-26',
+      Accept: 'application/json'
+    },
+    body: JSON.stringify(body)
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(
+      `Shopify MCP request failed (${response.status}): ${text}`
+    );
+  }
+
+  const json = await response.json();
+  return json;
+}
+import fetch from 'node-fetch';
+
+async function handleShopifyStorefrontMcpCall(
+  shopConfig: ShopConfig,
+  args: { scope: string; tool_name: string; arguments: any }
+) {
+  const { scope, tool_name, arguments: mcpArgs } = args;
+
+  let mcpEndpoint: string;
+
+  if (scope === 'global_catalog') {
+    mcpEndpoint = 'https://catalog.shopify.com/api/ucp/mcp';
+  } else if (scope === 'storefront') {
+    mcpEndpoint = shopConfig.storefrontMcpUrl;
+  } else {
+    throw new Error('Unknown scope: ' + scope);
+  }
+
+  const argsWithProfile = {
+    ...mcpArgs,
+    meta: {
+      ...(mcpArgs.meta || {}),
+      'ucp-agent': {
+        profile: shopConfig.ucpProfileUrl,
+        ...(mcpArgs.meta?.['ucp-agent'] || {})
+      }
+    }
+  };
+
+  const body = {
+    jsonrpc: '2.0',
+    method: 'tools/call',
+    id: Date.now(),
+    params: {
+      name: tool_name,
+      arguments: argsWithProfile
+In your Gemini live session handler:
+
+When Gemini emits a tool call:
+name: 'shopifyStorefrontMcpCall'
+You call handleShopifyStorefrontMcpCall(shopConfig, args).
+You send the returned JSON back to Gemini as the function result.
+6. “What if the merchant doesn’t know about agentic commerce stuff?”
+Doesn’t matter.
+
+Your onboarding flow is:
+
+Merchant sees FaceTimefy in the App Store, likes the demo, hits Install.
+Shopify runs your app’s OAuth install:
+You store their shop_domain, access_token, storefrontMcpUrl.
+You tell them:
+“Drop this orb block in your theme”
+(Theme App Extension block)
+Customer hits their site, sees the orb, clicks once → live.
+Your code:
+Uses shopDomain from the DOM → WebSocket query.
+Loads shopConfig → knows storefrontMcpUrl.
+Gemini Live uses shopifyStorefrontMcpCall → calls that MCP URL for catalog/cart/checkout.
+The merchant never has to know UCP, MCP, “agentic commerce”, or any of that. They just see “FaceTimefy: talk to an AI and sell more stuff.”
+
+7. Where to go next
+You said:
+
+I’m asking you real questions I need onboarding and I need coding from the back…
+
+You now have:
+
+Frontend snippet that gives you shopDomain in orb.js.
+Auth callback that stores ShopConfig on install.
+WS live endpoint that binds each orb session to a ShopConfig.
+Gemini function declaration to call Shopify MCP.
+Concrete handler that maps scope → mcpEndpoint and sends JSON‑RPC.
+If you show me:
+
+How you currently start a Gemini 3.1 Flash Live session in code, I can literally drop the functionDeclarations + handleShopifyStorefrontMcpCall into your exact client library syntax, so you’re not guessing how to wire the tool callback.
+
+
+
+
+
+
+
+
+
+
+
+---
+title: Storefront MCP server
+description: >-
+  Learn how to use the Storefront MCP server tools to help shoppers browse
+  products, manage carts, and checkout from a specific Shopify store.
+source_url:
+  html: 'https://shopify.dev/docs/apps/build/storefront-mcp/servers/storefront'
+  md: 'https://shopify.dev/docs/apps/build/storefront-mcp/servers/storefront.md'
+---
+
+# Storefront MCP server
+
+Connect your AI agent to a specific Shopify store's catalog, shopping cart, and policies. The Storefront MCP server helps customers browse and buy with their selected merchant.
+
+**UCP catalog capability:**
+
+Storefront MCP implements the [UCP Catalog capability](https://ucp.dev/latest/specification/catalog/) and its [MCP binding](https://ucp.dev/latest/specification/catalog/mcp/). The `search_catalog`, `lookup_catalog`, and `get_product` tools conform to the UCP specification. Refer to the [UCP catalog spec](https://ucp.dev/latest/specification/catalog/) for the authoritative schema reference.
+
+***
+
+## How it works
+
+The Storefront MCP server lets your AI agent handle shopping tasks for the selected store:
+
+1. A shopper asks about products while browsing a store.
+2. Your agent searches the store's catalog and manages carts.
+3. The shopper adds items and completes checkout.
+
+***
+
+## Connect to the server
+
+Each Shopify store has its own MCP server endpoint that exposes storefront features. This endpoint handles all server calls for product search, cart operations, and policy questions:
+
+```text
+https://{shop}.myshopify.com/api/mcp
+```
+
+This endpoint is unique to each store and gives access to all storefront commerce capabilities. Your app needs to configure this endpoint based on which store the customer is shopping with.
+
+**Caution:**
+
+By using the Shopify MCP servers, you agree to the [Shopify API License and Terms of Use](https://www.shopify.com/legal/api-terms).
+
+***
+
+## Create an API request to the Storefront MCP server
+
+Storefront MCP servers don't require authentication:
+
+1. Replace `{shop}.myshopify.com` with the store's actual domain.
+2. Send requests to the store's MCP endpoint.
+3. Include the Content-Type header.
+
+Here's how to set up a request:
+
+```js
+// Basic setup for Storefront MCP server requests
+const storeDomain = 'your-store.myshopify.com';
+// Standard Storefront MCP endpoint (cart, policies)
+const mcpEndpoint = `https://${storeDomain}/api/mcp`;
+
+
+// UCP catalog endpoint (search_catalog, lookup_catalog, get_product)
+const ucpMcpEndpoint = `https://${storeDomain}/api/ucp/mcp`;
+
+
+// UCP catalog tools require an agent profile in every request
+const agentProfile = 'https://shopify.dev/ucp/agent-profiles/examples/2026-04-08/valid-with-capabilities.json';
+
+
+// Example: search for products using UCP catalog tools
+fetch(ucpMcpEndpoint, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    jsonrpc: '2.0',
+    method: 'tools/call',
+    id: 1,
+    params: {
+      name: 'search_catalog',
+      arguments: {
+        meta: {
+          'ucp-agent': { profile: agentProfile }
+        },
+        catalog: {
+          query: 'coffee'
+        }
+      }
+    }
+  })
+});
+```
+
+**Note:**
+
+Note: Some stores may restrict access. Always test with your specific store.
+
+***
+
+## Tool endpoints
+
+### UCP catalog tools
+
+The UCP catalog tools (`search_catalog`, `lookup_catalog`, and `get_product`) are available on a separate endpoint from the standard Storefront MCP tools:
+
+```text
+https://{shop}.myshopify.com/api/ucp/mcp
+```
+
+These tools implement the [Universal Commerce Protocol (UCP) catalog capability](https://ucp.dev/specification/catalog/) and use a `catalog` wrapper object in their request arguments. Refer to the [UCP catalog specification](https://ucp.dev/specification/catalog/) for the full reference.
+
+### Standard tools
+
+The standard Storefront MCP tools (`get_cart`, `update_cart`, and `search_shop_policies_and_faqs`) are available on a separate endpoint from the UCP-conforming tools:
+
+```text
+https://{shop}.myshopify.com/api/mcp
+```
+
+***
+
+## Available tools
+
+### search\_​catalog
+
+Searches the store's product catalog to find items that match your customer's needs.
+
+**Key parameters** (inside `catalog` object):
+
+* `query`: Free-text search query
+* `context`: Buyer signals for relevance and localization (country, language, currency, intent)
+* `filters`: Filter by categories or price range (in minor currency units)
+* `pagination`: Cursor-based pagination (cursor, limit)
+
+**Example use**:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "tools/call",
+  "id": 1,
+  "params": {
+    "name": "search_catalog",
+    "arguments": {
+      "meta": {
+        "ucp-agent": {
+          "profile": "https://shopify.dev/ucp/agent-profiles/examples/2026-04-08/valid-with-capabilities.json"
+        }
+      },
+      "catalog": {
+        "query": "organic coffee beans",
+        "context": {
+          "address_country": "US",
+          "intent": "Customer prefers fair trade products"
+        }
+      }
+    }
+  }
+}
+```
+
+### lookup\_​catalog
+
+Retrieves products or variants by identifier. Use this when you already have product or variant IDs from search results, saved lists, or deep links.
+
+**Key parameters** (inside `catalog` object):
+
+* `ids`: Array of product or variant identifiers (required, up to 10)
+* `context`: Buyer signals for localization
+* `filters`: Post-resolution filters (categories, price)
+
+**Example use**:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "tools/call",
+  "id": 1,
+  "params": {
+    "name": "lookup_catalog",
+    "arguments": {
+      "meta": {
+        "ucp-agent": {
+          "profile": "https://shopify.dev/ucp/agent-profiles/examples/2026-04-08/valid-with-capabilities.json"
+        }
+      },
+      "catalog": {
+        "ids": ["gid://shopify/Product/123", "gid://shopify/ProductVariant/456"],
+        "context": {
+          "address_country": "US"
+        }
+      }
+    }
+  }
+}
+```
+
+### get\_​product
+
+Retrieves full details for a single product, with optional interactive variant selection. Use this when a customer has selected a product and needs detailed information for a purchase decision.
+
+**Key parameters** (inside `catalog` object):
+
+* `id`: Product or variant identifier (required)
+* `selected`: Option selections for variant narrowing (e.g., `[{"name": "Color", "label": "Blue"}]`)
+* `preferences`: Option names in relaxation priority order
+* `context`: Buyer signals for localization
+* `filters`: Post-resolution filters (categories, price)
+
+**Example use**:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "tools/call",
+  "id": 1,
+  "params": {
+    "name": "get_product",
+    "arguments": {
+      "meta": {
+        "ucp-agent": {
+          "profile": "https://shopify.dev/ucp/agent-profiles/examples/2026-04-08/valid-with-capabilities.json"
+        }
+      },
+      "catalog": {
+        "id": "gid://shopify/Product/123",
+        "selected": [
+          {"name": "Color", "label": "Blue"}
+        ],
+        "context": {
+          "address_country": "US"
+        }
+      }
+    }
+  }
+}
+```
+
+**Note:**
+
+These catalog tools conform to the [UCP catalog specification](https://ucp.dev/specification/catalog/). Refer to the UCP spec for the complete request/response schema, including product, variant, and pagination shapes.
+
+### search\_​shop\_​policies\_​and\_​faqs
+
+Answers questions about the store's policies, products, and services to build customer trust.
+
+**Key parameters**:
+
+* `query`: The question about policies or FAQs (required)
+* `context`: Additional context like current product (optional)
+
+**Example use**:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "tools/call",
+  "id": 1,
+  "params": {
+    "name": "search_shop_policies_and_faqs",
+    "arguments": {
+      "query": "What is your return policy for sale items?",
+      "context": "Customer is looking at discounted winter jackets"
+    }
+  }
+}
+```
+
+**Note:**
+
+Tip: Use only the provided answer to form your response. Don't include external information that might be inaccurate. For better store policy management, consider using the [Knowledge Base app](https://apps.shopify.com/shopify-knowledge-base) to configure store policies.
+
+### get\_​cart
+
+Retrieves the current contents of a cart, including item details and checkout URL.
+
+**Key parameters**:
+
+* `cart_id`: ID of an existing cart
+
+**Example use**:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "tools/call",
+  "id": 1,
+  "params": {
+    "name": "get_cart",
+    "arguments": {
+      "cart_id": "gid://shopify/Cart/abc123def456"
+    }
+  }
+}
+```
+
+### update\_​cart
+
+Updates quantities of items in an existing cart or adds new items. Creates a new cart if no cart ID is provided. Set quantity to 0 to remove an item.
+
+**Key parameters**:
+
+* `cart_id`: ID of the cart to update. Creates a new cart if not provided.
+* `lines`: Array of items to update or add (required, each with`quantity` and optional `line_item_id` for existing items)
+
+**Example use**:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "tools/call",
+  "id": 1,
+  "params": {
+    "name": "update_cart",
+    "arguments": {
+      "cart_id": "gid://shopify/Cart/abc123def456",
+      "add_items": [
+        {
+          "line_item_id": "gid://shopify/CartLine/line2",
+          "merchandise_id": "gid://shopify/ProductVariant/789012",
+          "quantity": 2
+        }
+      ]
+    }
+  }
+}
+```
+
+***
+
+
+
+
