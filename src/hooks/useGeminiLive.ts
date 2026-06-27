@@ -1,6 +1,16 @@
 import { useCallback, useRef, useState } from "react";
 import { GoogleGenAI, Modality, type LiveServerMessage } from "@google/genai";
 import { toast } from "sonner";
+import {
+  addMemoryMessage,
+  addMemoryToolDeclaration,
+  MEMORY_ADD_TOOL_NAME,
+} from "../tools/memory-add";
+import {
+  searchMemory,
+  searchMemoryToolDeclaration,
+  MEMORY_SEARCH_TOOL_NAME,
+} from "../tools/memory-search";
 
 const INPUT_RATE = 16000;
 const OUTPUT_RATE = 24000;
@@ -78,6 +88,9 @@ export function useGeminiLive(systemMessageSettings: LiveSystemMessageSettings) 
   const resumptionHandleRef = useRef<string | null>(null);
   const consentGoogleSearchRef = useRef(false);
   const consentTranscriptionRef = useRef(false);
+  const memoryApiKeyRef = useRef(import.meta.env.VITE_MEM0_API_KEY as string);
+  const memoryUserIdRef = useRef(import.meta.env.VITE_MEM0_USER_ID as string);
+  const memoryConversationIdRef = useRef(import.meta.env.VITE_MEM0_CONVERSATION_ID as string);
 
   const setConsentGoogleSearch = useCallback((value: boolean) => {
     consentGoogleSearchRef.current = value;
@@ -441,6 +454,11 @@ export function useGeminiLive(systemMessageSettings: LiveSystemMessageSettings) 
         await startStreaming();
 
         const tools: any[] = [];
+
+        tools.push({
+          functionDeclarations: [addMemoryToolDeclaration, searchMemoryToolDeclaration],
+        });
+
         if (systemMessageSettings.enableGoogleSearch && consentGoogleSearchRef.current) {
           tools.push({ googleSearch: {} });
         }
@@ -486,6 +504,67 @@ export function useGeminiLive(systemMessageSettings: LiveSystemMessageSettings) 
             onmessage: async (message: LiveServerMessage) => {
               if (message.serverContent?.interrupted) {
                 resetPlayback();
+              }
+
+              const toolCalls = (message as any)?.toolCall?.functionCalls ?? [];
+              if (toolCalls.length > 0 && sessionRef.current) {
+                const functionResponses = [];
+
+                for (const call of toolCalls) {
+                  const name = call?.name as string;
+                  const callId = call?.id as string;
+                  const args = (call?.args ?? {}) as Record<string, unknown>;
+
+                  try {
+                    if (name === MEMORY_ADD_TOOL_NAME) {
+                      const response = await addMemoryMessage({
+                        apiKey: memoryApiKeyRef.current,
+                        body: {
+                          user_id: memoryUserIdRef.current,
+                          conversation_id: memoryConversationIdRef.current,
+                          messages: args.messages as { role: "user" | "assistant"; content: string }[],
+                        },
+                      });
+                      const data = await response.json();
+                      functionResponses.push({
+                        id: callId,
+                        name,
+                        response: data,
+                      });
+                    } else if (name === MEMORY_SEARCH_TOOL_NAME) {
+                      const response = await searchMemory({
+                        apiKey: memoryApiKeyRef.current,
+                        body: {
+                          query: args.query as string,
+                          user_id: memoryUserIdRef.current,
+                          conversation_id: memoryConversationIdRef.current,
+                        },
+                      });
+                      const data = await response.json();
+                      functionResponses.push({
+                        id: callId,
+                        name,
+                        response: data,
+                      });
+                    } else {
+                      functionResponses.push({
+                        id: callId,
+                        name,
+                        response: { error: `Unknown function: ${name}` },
+                      });
+                    }
+                  } catch (error) {
+                    functionResponses.push({
+                      id: callId,
+                      name,
+                      response: {
+                        error: error instanceof Error ? error.message : "Tool execution failed",
+                      },
+                    });
+                  }
+                }
+
+                sessionRef.current.sendToolResponse({ functionResponses });
               }
 
               if ((message as any).sessionResumptionUpdate?.newHandle) {
