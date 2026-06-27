@@ -1,16 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import { GoogleGenAI, Modality, type LiveServerMessage } from "@google/genai";
 import { toast } from "sonner";
-import {
-  addMemoryMessage,
-  addMemoryToolDeclaration,
-  MEMORY_ADD_TOOL_NAME,
-} from "../tools/memory-add";
-import {
-  searchMemory,
-  searchMemoryToolDeclaration,
-  MEMORY_SEARCH_TOOL_NAME,
-} from "../tools/memory-search";
+
 
 const INPUT_RATE = 16000;
 const OUTPUT_RATE = 24000;
@@ -22,6 +13,7 @@ type LiveSystemMessageSettings = {
   model?: string;
   enableGoogleSearch?: boolean;
   enabledMcpTools?: string[];
+  responseModality?: "AUDIO" | "TEXT";
 };
 
 type TranscriptItem = { role: "user" | "tatty"; text: string };
@@ -651,6 +643,11 @@ export function useGeminiLive(systemMessageSettings: LiveSystemMessageSettings) 
     ],
   );
 
+  const sendText = useCallback((text: string) => {
+    if (!sessionRef.current || !isSessionOpenRef.current) return;
+    sessionRef.current.sendRealtimeInput({ text });
+  }, []);
+
   const toggleMute = useCallback(() => {
     setIsMuted((prev) => {
       const next = !prev;
@@ -699,6 +696,7 @@ export function useGeminiLive(systemMessageSettings: LiveSystemMessageSettings) 
     canvasRef,
     startConnection,
     disconnect,
+    sendText,
     toggleMute,
     toggleVideo,
     flipCamera,
